@@ -84,6 +84,11 @@
     "^ *[Bb][Ff][Ii][Ll][^ \n]*" 
     "^ *[Dd][Ee][Ss][Ii][^ \n]*"))
 
+(defvar avl-keyword-list-regexp
+  (concat "\\(\\s-\\|^\\)\\("
+	  (mapconcat 'identity avl-keyword-list "\\|")
+	  "\\)\\(\\s-\\|$\\)"))
+
 
 (defvar avl-last-point nil
   "The point before the last command")
@@ -99,13 +104,11 @@
 
 (defconst avl-font-lock-keywords
   (list
-   (cons "\\(?:[Ss][Uu][Rr][Ff].*\\|[Aa][Ff][Ii][Ll].*\\|[Bb][Oo][Dd][Yy]\\)\n\\(.*\\)$"
+   (cons "\\(?:[Ss][Uu][Rr][Ff].*\\|[Aa][Ff][Ii][Ll].*\\|[Bb][Oo][Dd][Yy]\\)\n\\(.*\\)$" 
 	 (list 1 'font-lock-type-face))
    (cons "[Cc][Oo][Nn][Tt].*\n\\([a-zA-Z0-9]*\\) "
 	 (list 1 'font-lock-type-face))
-   (cons (concat "\\(\\s-\\|^\\)\\("
-		 (mapconcat 'identity avl-keyword-list "\\|")
-		 "\\)\\(\\s-\\|$\\)")
+   (cons avl-keyword-list-regexp
 	 'font-lock-keyword-face)
    (cons "^\\([a-zA-Z ]+\\)$"   ; for non SURFACE/AFILE/BODY/CONTROL strings
 	 (list 1 'font-lock-type-face))
@@ -113,6 +116,7 @@
   "Keywords to highlight for AVL.  See variable `font-lock-keywords'.")
 
 
+	    
 
 (defun avl-mode ()
   "Major mode for editing AVL code."
@@ -126,7 +130,7 @@
   (use-local-map avl-mode-map)
 
   (setq indent-tabs-mode nil)     ; spaces not tabs!
-  (setq tab-stop-list (number-sequence 0 100 avl-indent-level))
+  (setq tab-stop-list (numseq 0 100 avl-indent-level))
 
 ; this is necessary because font-lock defaults to "not immediately" which messes
 ; with the avl-pre/post-commands
@@ -141,7 +145,7 @@
 
 
 (defun avl-uninsert-comment ()
-  "Removes the preceding comment"
+  "Removes the preceding full line comment"
   (interactive)
   (search-backward-regexp "^ *[#!]")
   (kill-entire-line))
@@ -150,7 +154,7 @@
 (defun avl-insert-standard-comment ()
   "Inserts a comment describing the fields below a section heading"
   (interactive)
-  (search-backward-for-section)
+  (search-backward-section)
   (let ((final-point (point)))
     (dolist (standard-comment avl-standard-comments)
       (save-excursion
@@ -163,14 +167,11 @@
     (goto-char final-point)))
 
 
-(defun search-backward-for-section ()
-  "Positions cursor at the beginning of the previous section heading"
-  (if (search-backward-regexp              
-       (concat "\\(\\s-\\|^\\)\\(" 
-	       (mapconcat 'identity avl-keyword-list "\\|")
-	       "\\)\\(\\s-\\|$\\)") nil t)
+(defun search-backward-section ()
+  "Returns the point of and positions cursor at the beginning of the previous section heading."
+  (if (search-backward-regexp avl-keyword-list-regexp nil t)
       (point)
-    (point-min)))
+    (goto-char (point-min))))
 
 
 (defun avl-pre-command ()
@@ -180,7 +181,7 @@
     (setq avl-use-wide-fontify-buffer 
 	  (or (is-face 'font-lock-type-face)
 	      (progn 	      ; this second bit helps with backspace edits to the control surface string 
-		(search-backward-regexp "^") 
+		(beginning-of-line)
 		(is-face 'font-lock-type-face))))))
 
 
@@ -188,13 +189,16 @@
   "Actions after a command is executed.  Used for font-lock on multiline regexps"
   (save-excursion 
     (if avl-use-wide-fontify-buffer
-	(let ((beg (save-excursion
-		     (if avl-last-point (goto-char avl-last-point))   ; goto point where there was a font-lock-type-face
-		     (search-backward-regexp "^" nil t)               ; goto beginning of line
-		     (search-backward-for-section)))
-	      (end (min (save-excursion (forward-line 1) (point)) (point-max))))
-	  (copy-region-as-kill beg end)
-	  (font-lock-fontify-region beg end t)))))
+	(avl-wide-fontify))))
+
+
+(defun avl-wide-fontify ()
+  (let ((beg (save-excursion
+	       (if avl-last-point (goto-char avl-last-point))   ; goto point where there was a font-lock-type-face
+	       (beginning-of-line)                              ; goto beginning of line
+	       (search-backward-section)))
+	(end (save-excursion (forward-line 1) (point))))
+    (font-lock-fontify-region beg end t)))
 
 
 (defun avl-unindent-command ()
@@ -216,8 +220,7 @@
 	  (if (eq orig (point))
 	      (progn
 		(skip-chars-forward "^ \t\n")
-		(avl-skip-field-forward)
-		))))
+		(avl-skip-field-forward)))))
     (progn 
       (skip-chars-forward "^\n")
       (forward-char))))
@@ -243,7 +246,7 @@ and ending points"
 (defun avl-indent-all () 
   "Indents the entire file"
   (interactive)
-  (avl-indent-region (cons '(point-min) '(point-max))))
+  (avl-indent-region (cons 'point-min 'point-max)))
 
 
 (defun avl-skip-field-forward ()
@@ -290,6 +293,10 @@ is not a space"
 
 ;;; Helper functions
 
+(defun numseq (beg end incr)
+  (if (< beg end)
+      (cons beg (numseq (+ beg incr) end incr))))    
+
 (defun is-face (face)
   "bleh"
   (eq (get-text-property (point) 'face) face))
@@ -309,45 +316,3 @@ is not a space"
     num-skipped))
 
 
-;;; Compatibility functions (Emacs -> XEmacs)
-
-; In addition the function number-sequence is not defined in XEmacs. So I 
-; copied the definition from the emacs distribution (in subr.el):
-(defun number-sequence (from &optional to inc)
-  "Return a sequence of numbers from FROM to TO (both inclusive) as a list. 
-INC is the increment used between numbers in the sequence and defaults to 1. 
-So, the Nth element of the list is \(+ FROM \(* N INC)) where N counts from 
-zero. TO is only included if there is an N for which TO = FROM + N * INC. 
-If TO is nil or numerically equal to FROM, return \(FROM).
-If INC is positive and TO is less than FROM, or INC is negative
-and TO is larger than FROM, return nil.
-If INC is zero and TO is neither nil nor numerically equal to
-FROM, signal an error.
-
-This function is primarily designed for integer arguments.
-Nevertheless, FROM, TO and INC can be integer or float. However,
-floating point arithmetic is inexact. For instance, depending on
-the machine, it may quite well happen that
-\(number-sequence 0.4 0.6 0.2) returns the one element list \(0.4),
-whereas \(number-sequence 0.4 0.8 0.2) returns a list with three
-elements. Thus, if some of the arguments are floats and one wants
-to make sure that TO is included, one may have to explicitly write
-TO as \(+ FROM \(* N INC)) or use a variable whose value was
-computed with this exact expression. Alternatively, you can,
-of course, also replace TO with a slightly larger value
-\(or a slightly more negative value if INC is negative)."
-  (if (or (not to) (= from to))
-      (list from)
-    (or inc (setq inc 1))
-    (when (zerop inc) (error "The increment can not be zero"))
-    (let (seq (n 0) (next from))
-      (if (> inc 0)
-	  (while (<= next to)
-	    (setq seq (cons next seq)
-		  n (1+ n)
-		  next (+ from (* n inc))))
-	(while (>= next to)
-	  (setq seq (cons next seq)
-		n (1+ n)
-		next (+ from (* n inc)))))
-      (nreverse seq))))
