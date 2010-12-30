@@ -25,6 +25,11 @@
   :type 'integer
   :group 'avl)
 
+(defcustom avl-executable-location "C:\\Progra~1\\Aero\\Avl\\bin\\avl.exe"
+  "Location of the avl executable"
+  :type 'string
+  :group 'avl)
+
 
 (defvar avl-mode-map ()
   "Keymap used in AVL mode.")
@@ -32,6 +37,8 @@
     (progn
       (setq avl-mode-map (make-sparse-keymap))
       (set-keymap-name avl-mode-map 'avl-mode-map)
+      (define-key avl-mode-map [(control p)] 'avl-plot-geometry)
+      (define-key avl-mode-map [(control e)] 'avl-execute)
       (define-key avl-mode-map "\t" 'avl-indent-command)
       (define-key avl-mode-map [(control return)] 'avl-insert-standard-comment)
       (define-key avl-mode-map [(control shift return)] 'avl-uninsert-comment)
@@ -142,6 +149,48 @@
 
   (font-lock-fontify-buffer)
 )
+
+
+(defun avl-execute () 
+  (interactive)
+  (write-file (file-name-nondirectory (buffer-file-name)))
+  (if (get-buffer "AVL-RUN")
+      (kill-buffer "AVL-RUN"))
+  (shell-command (concat avl-executable-location 
+			 " "
+			 (file-name-nondirectory (buffer-file-name))
+			 " &") 
+		 "AVL-RUN")
+  (switch-to-buffer "AVL-RUN")
+  (delete-other-windows))
+
+
+(defun avl-plot-geometry () 
+  (interactive)
+  (write-file (file-name-nondirectory (buffer-file-name)))
+  (if (get-buffer "AVL-RUN")
+      (kill-buffer "AVL-RUN"))
+  (shell-command (concat avl-executable-location 
+			 " "
+			 (file-name-nondirectory (buffer-file-name))
+			 " &") 
+		 "AVL-RUN")
+  (let ((old-buffer (current-buffer)))
+    (set-buffer "AVL-RUN")
+    (insert-string "oper")
+    (comint-send-input)
+    (insert-string "g")
+    (comint-send-input)
+    (insert-string "k")
+    (comint-send-input)
+    (insert-string " ")
+    (comint-send-input)
+    (insert-string " ")
+    (comint-send-input)
+    (insert-string "quit")
+    (comint-send-input)
+    (set-buffer old-buffer)
+    (delete-other-windows)))
 
 
 (defun avl-uninsert-comment ()
