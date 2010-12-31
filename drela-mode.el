@@ -9,8 +9,17 @@
 
 ;; This is a major mode for editing files used in Drela's aerodynamic
 ;; codes.  The mode supports syntax highlighting, easy tabbing through
-;; and indentation of data elements, and other features.  This version
-;; only supports AVL.  Future versions will support other Drela codes.
+;; and indentation of data elements, plotting of geometries, and running
+;; AVL within EMACS.  This version only supports AVL.  Future versions 
+;; will support other Drela codes.
+;;
+;; AVL functions:
+;; C-p        Plots the geometry of the current AVL file
+;; C-e        Executes AVL on the current AVL file
+;; C-RET      Inserts a "standard" comment
+;; C-Sh-RET   Removes the preceding comment
+;; Tab        Moves to next element/indents elements
+;; Sh-Tab     Moves to previous element
 
 ;;; Code:
 
@@ -151,8 +160,7 @@
 )
 
 
-(defun avl-execute () 
-  (interactive)
+(defun avl-run ()
   (write-file (file-name-nondirectory (buffer-file-name)))
   (if (get-buffer "AVL-RUN")
       (kill-buffer "AVL-RUN"))
@@ -160,37 +168,39 @@
 			 " "
 			 (file-name-nondirectory (buffer-file-name))
 			 " &") 
-		 "AVL-RUN")
+		 "AVL-RUN"))
+  
+
+(defun avl-execute () 
+  (interactive)
+  (avl-run)
   (switch-to-buffer "AVL-RUN")
   (delete-other-windows))
 
 
+(defun avl-send-command (cmd &optional buffer)
+  (if buffer
+      (let ((old-buffer (current-buffer)))
+	(set-buffer buffer)
+	(avl-send-command cmd)
+	(set-buffer old-buffer)
+	(delete-other-windows))
+    (if cmd
+	(let ((end (string-match "\n" cmd)))
+	  (if end   ; send up to string match, recurse
+	      (progn
+		(insert-string (substring cmd 0 end))
+		(comint-send-input)
+		(avl-send-command (substring cmd (min (length cmd) (1+ end)))))
+	    (progn   ; send remaing string
+	      (insert-string cmd)
+	      (comint-send-input)))))))
+
+
 (defun avl-plot-geometry () 
   (interactive)
-  (write-file (file-name-nondirectory (buffer-file-name)))
-  (if (get-buffer "AVL-RUN")
-      (kill-buffer "AVL-RUN"))
-  (shell-command (concat avl-executable-location 
-			 " "
-			 (file-name-nondirectory (buffer-file-name))
-			 " &") 
-		 "AVL-RUN")
-  (let ((old-buffer (current-buffer)))
-    (set-buffer "AVL-RUN")
-    (insert-string "oper")
-    (comint-send-input)
-    (insert-string "g")
-    (comint-send-input)
-    (insert-string "k")
-    (comint-send-input)
-    (insert-string " ")
-    (comint-send-input)
-    (insert-string " ")
-    (comint-send-input)
-    (insert-string "quit")
-    (comint-send-input)
-    (set-buffer old-buffer)
-    (delete-other-windows)))
+  (avl-run)
+  (avl-send-command "oper\ng\nk\n \n \nquit\n" "AVL-RUN"))
 
 
 (defun avl-uninsert-comment ()
