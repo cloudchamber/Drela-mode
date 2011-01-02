@@ -45,7 +45,8 @@
 (if (null avl-mode-map)
     (progn
       (setq avl-mode-map (make-sparse-keymap))
-      (set-keymap-name avl-mode-map 'avl-mode-map)
+      (if (functionp 'set-keymap-name)
+	  (set-keymap-name avl-mode-map 'avl-mode-map)) ;XEmacs
       (define-key avl-mode-map [(control p)] 'avl-plot-geometry)
       (define-key avl-mode-map [(control e)] 'avl-execute)
       (define-key avl-mode-map "\t" 'avl-indent-command)
@@ -138,7 +139,7 @@
   "Major mode for editing AVL code."
   (interactive)
   (kill-all-local-variables)
-
+  
   (setq major-mode 'avl-mode)
   (setq mode-name "AVL")
 
@@ -148,12 +149,21 @@
   (setq indent-tabs-mode nil)     ; spaces not tabs!
   (setq tab-stop-list (numseq 0 100 avl-indent-level))
 
+  (if (featurep 'emacs)
+      (font-lock-add-keywords 'avl-mode avl-font-lock-keywords))
+
 ; this is necessary because font-lock defaults to "not immediately" which messes
 ; with the avl-pre/post-commands
   (set (make-local-variable 'font-lock-always-fontify-immediately) t) 
 
-  (add-local-hook 'pre-command-hook 'avl-pre-command)
-  (add-local-hook 'post-command-hook 'avl-post-command)
+  (if (functionp 'add-local-hook) 
+      (progn
+	(add-local-hook 'pre-command-hook 'avl-pre-command) ;XEmacs
+	(add-local-hook 'post-command-hook 'avl-post-command))
+    (progn
+      (add-hook 'pre-command-hook 'avl-pre-command t) ;Emacs
+      (add-hook 'post-command-hook 'avl-post-command t)))
+
   (run-hooks 'avl-mode-hook)
 
   (font-lock-fontify-buffer)
@@ -170,6 +180,7 @@
 			 " &") 
 		 "AVL-RUN"))
   
+
 
 (defun avl-execute () 
   (interactive)
@@ -189,11 +200,13 @@
 	(let ((end (string-match "\n" cmd)))
 	  (if end   ; send up to string match, recurse
 	      (progn
-		(insert-string (substring cmd 0 end))
+		(goto-char (point-max))
+		(insert (substring cmd 0 end))
 		(comint-send-input)
 		(avl-send-command (substring cmd (min (length cmd) (1+ end)))))
 	    (progn   ; send remaing string
-	      (insert-string cmd)
+	      (goto-char (point-max))
+	      (insert cmd)
 	      (comint-send-input)))))))
 
 
@@ -353,21 +366,24 @@ is not a space"
 ;;; Helper functions
 
 (defun numseq (beg end incr)
+  "Returns a sequence of numbers beginning at beg, increasing by incr, upto end"
   (if (< beg end)
       (cons beg (numseq (+ beg incr) end incr))))    
 
 (defun is-face (face)
-  "bleh"
+  "Returns true if the current point is equal to face"
   (eq (get-text-property (point) 'face) face))
 
 (defun skip-face-forward (face)
+  "Skips forward until at a different face"
   (skip-face 'forward-char face))
 
 (defun skip-face-backward (face)
+  "Skips backward until at a different face"
   (skip-face 'backward-char face))
 
 (defun skip-face (cmd face)
-  "bleh"
+  "Skips using cmd until at a different face"
   (let ((num-skipped 0))
     (while (is-face face)
       (funcall cmd)
