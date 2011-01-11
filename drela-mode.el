@@ -3,21 +3,25 @@
 ;; Copyright (C) 2010, Kenneth Jensen.
 
 ;; Author: Kenneth Jensen <kjensen@alum.mit.edu>
-;; Keywords: aerodynamics, AVL
+;; Keywords: aerodynamics, AVL, ASWING
 
 ;;; Commentary:
 
 ;; This is a major mode for editing files used in Drela's aerodynamic
 ;; codes.  The mode supports syntax highlighting, easy tabbing through
 ;; and indentation of data elements, plotting of geometries, and running
-;; AVL within EMACS.  This version only supports AVL.  Future versions 
-;; will support other Drela codes.
+;; AVL within EMACS.  This version is still a work-in-progress and only 
+;; supports AVL and a little ASWING.  
 ;;
 ;; AVL functions:
 ;; C-p        Plots the geometry of the current AVL file
 ;; C-e        Executes AVL on the current AVL file
 ;; C-RET      Inserts a "standard" comment
 ;; C-Sh-RET   Removes the preceding comment
+;; Tab        Moves to next element/indents elements
+;; Sh-Tab     Moves to previous element
+;;
+;; ASWING functions:
 ;; Tab        Moves to next element/indents elements
 ;; Sh-Tab     Moves to previous element
 
@@ -52,7 +56,8 @@
       (define-key avl-mode-map "\t" 'avl-indent-command)
       (define-key avl-mode-map [(control return)] 'avl-insert-standard-comment)
       (define-key avl-mode-map [(control shift return)] 'avl-uninsert-comment)
-      (define-key avl-mode-map [(shift tab)] 'avl-unindent-command)))
+      (define-key avl-mode-map [(shift tab)] 'avl-unindent-command)
+      (define-key avl-mode-map [(backtab)] 'avl-unindent-command)))
 
 
 (defvar avl-mode-syntax-table nil
@@ -226,7 +231,7 @@
 (defun avl-insert-standard-comment ()
   "Inserts a comment describing the fields below a section heading"
   (interactive)
-  (search-backward-section)
+  (avl-search-backward-section)
   (let ((final-point (point)))
     (dolist (standard-comment avl-standard-comments)
       (save-excursion
@@ -239,7 +244,7 @@
     (goto-char final-point)))
 
 
-(defun search-backward-section ()
+(defun avl-search-backward-section ()
   "Returns the point of and positions cursor at the beginning of the previous section heading."
   (if (search-backward-regexp avl-keyword-list-regexp nil t)
       (point)
@@ -268,7 +273,7 @@
   (let ((beg (save-excursion
 	       (if avl-last-point (goto-char avl-last-point))   ; goto point where there was a font-lock-type-face
 	       (beginning-of-line)                              ; goto beginning of line
-	       (search-backward-section)))
+	       (avl-search-backward-section)))
 	(end (save-excursion (forward-line 1) (point))))
     (font-lock-fontify-region beg end t)))
 
@@ -359,6 +364,228 @@ is not a space"
 
 
 (add-to-list 'auto-mode-alist '("\\.avl\\'" . avl-mode))
+
+
+
+
+;;; ASWING Mode
+
+(defgroup asw nil
+  "Major mode for editing ASWING (.asw) files."
+  :group 'languages)
+
+
+(defcustom asw-indent-level 10
+  "Indentation between number fields"
+  :type 'integer
+  :group 'avl)
+
+
+(defvar asw-mode-map ()
+  "Keymap used in ASW mode.")
+(if (null asw-mode-map)
+    (progn
+      (setq asw-mode-map (make-sparse-keymap))
+      (if (functionp 'set-keymap-name )
+	  (set-keymap-name asw-mode-map 'asw-mode-map)) ; XEmacs
+      (define-key asw-mode-map "\t" 'asw-indent-command)
+      (define-key asw-mode-map [(shift tab)] 'asw-unindent-command)
+      (define-key asw-mode-map [(backtab)] 'asw-unindent-command)))
+
+
+(defvar asw-mode-syntax-table nil
+  "Syntax table in use in asw-mode buffers.")
+(if asw-mode-syntax-table
+    ()
+  (setq asw-mode-syntax-table (make-syntax-table))
+  (modify-syntax-entry ?\n ">" asw-mode-syntax-table)
+  (modify-syntax-entry ?\f ">" asw-mode-syntax-table)
+  (modify-syntax-entry ?\# "<" asw-mode-syntax-table)
+  (modify-syntax-entry ?! "<" asw-mode-syntax-table))
+
+
+(defcustom asw-mode-hook nil
+  "Hook run on entry to ASW mode."
+  :type 'hook
+  :group 'asw)
+
+
+(defvar asw-keyword-list
+  '(; Section headings
+    "Name" "Units" "Constant" "Reference" "Ground" "Joint" "Strut" "Weight" "Beam +[0-9]" "End"
+    ; Operators
+    "\\+" "*"))
+
+(defvar asw-keyword-list-regexp
+  (concat "^\\s-*\\("
+	  (mapconcat 'identity asw-keyword-list "\\|")
+	  "\\)\\(\\s-\\|$\\)"))
+
+
+(defvar asw-variable-list
+  '("t" "x" "y" "z" "twist" "chord" "Xax" 
+    "alpha" "Cm" "CLmax" "CLmin" "dCLda"
+    "dCLdF[1-9]" "dCMdF[1-9]" "dCDdF[1-9]"
+    "EIcc" "EInn" "EIcn" "EIcs" "EIsn" "GJ" "EA" "GKc" "GKn"
+    "mgcc" "mgnn" "mg" "Ccg" "Ncg" "Dmgcc" "Dmgnn" "Dmg" "DCcg" "DNcg"
+    "Cea" "Nea" "Cta" "Nta"
+    "tdeps" "tdgam"
+    "Cshell" "Nshell" "Atshell"
+    "radius" "Cdf" "Cdp"))
+
+
+(defvar asw-string-list
+  '("a-zA-Z0-9 "))
+
+
+(defconst asw-font-lock-keywords
+  (list
+   (cons "Name\\(?:\\s-\\|\n\\)+\\([a-zA-Z0-9 ]*\\)"
+	 (list 1 'font-lock-type-face))
+   (cons "Beam [0-9]\\(?:\\s-\\|\n\\)+\\([a-zA-Z0-9 ]*\\)"
+	 (list 1 'font-lock-type-face))
+   (cons (concat "\\(\\s-\\|^\\)\\("
+		 (mapconcat 'identity asw-keyword-list "\\|")
+		 "\\)\\(\\s-\\|$\\)")
+	 'font-lock-keyword-face)
+   (cons (concat "\\(\\s-\\|^\\)\\("
+		 (mapconcat 'identity asw-variable-list "\\|")
+		 "\\)\\(\\s-\\|$\\)")
+	 'font-lock-variable-name-face)
+   )
+  "Keywords to highlight for ASW.  See variable `font-lock-keywords'.")
+
+
+;;;###autoload
+(defun asw-mode ()
+  (interactive)
+  (kill-all-local-variables)
+  (setq major-mode 'asw-mode)
+  (setq mode-name "ASW")
+
+  (setq indent-tabs-mode nil)     ; spaces not tabs!
+
+  (set-syntax-table asw-mode-syntax-table)
+
+  (use-local-map asw-mode-map)
+
+  (if (featurep 'emacs)
+      (font-lock-add-keywords 'asw-mode asw-font-lock-keywords))
+
+;  (add-local-hook 'pre-command-hook 'pretest)
+;  (add-local-hook 'post-command-hook 'posttest)
+
+  (run-hooks 'asw-mode-hook)
+
+  (font-lock-fontify-buffer))
+
+
+(defun asw-search-backward-section ()
+  "Returns the point of and positions cursor at the beginning of the previous section heading."
+  (if (search-backward-regexp asw-keyword-list-regexp nil t)
+      (point)
+    (goto-char (point-min))))
+
+(defun asw-is-mult-plus-line ()
+  (eq (save-excursion (forward-char) (search-backward-regexp "^ *[+*]" nil t))
+      (save-excursion (beginning-of-line) (point))))
+
+(defun asw-is-mult-plus-section ()
+  (save-excursion
+    (asw-search-backward-section)
+    (while (asw-is-mult-plus-line) (asw-search-backward-section))
+    (eq (point) (progn (forward-line 1) 
+		       (search-backward-regexp "[Bb][Ee][Aa][Mm]" nil t)))))
+
+(defun asw-is-regexp-line (regexp) 
+  (save-excursion
+    (let ((orig (save-excursion (beginning-of-line) (point))))
+      (end-of-line)
+      (search-backward-regexp regexp orig t))))
+  
+(defun asw-is-end-line () 
+  (asw-is-regexp-line "^\\s-*[Ee][Nn][Dd]"))
+
+(defun asw-is-no-indent-line () 
+  (or (asw-is-regexp-line "^\\s-*\\([Ee][Nn][Dd]\\|[Bb][Ee][Aa][Mm]\\)")
+      (save-excursion
+	(forward-line -1)
+	(asw-is-regexp-line "^\\s-*[Bb][Ee][Aa][Mm]"))))
+
+(defun asw-skip-first-tab ()
+  (save-excursion
+    (cond ((asw-in-comment) nil)
+	  ((asw-is-no-indent-line) nil)
+	  ((asw-is-mult-plus-line) nil)
+	  ((asw-is-mult-plus-section) t)	     
+	  (t nil))))
+
+
+(defun asw-indent-command ()
+  "Indents text to appropriate tab stop or skips to next field"
+  (interactive)  
+  (setq tab-stop-list (numseq (if (asw-skip-first-tab) asw-indent-level 0) 200 asw-indent-level))
+  (if (or (not (asw-in-comment))
+	  (asw-is-tabable-comment))
+      (progn
+	(skip-chars-backward "^ \t\n")
+	(let ((orig (point)))
+	  (delete-horizontal-space)
+	  (or (and (not (asw-skip-first-tab)) (bolp)) (tab-to-tab-stop))
+	  (if (eq orig (point))
+	      (progn
+		(skip-chars-forward "^ \t\n")
+		(asw-skip-field-forward)))))
+    (progn 
+      (skip-chars-forward "^\n")
+      (forward-char))))
+
+
+(defun asw-unindent-command ()
+  "Skips to previous indent point"
+  (interactive)
+  (asw-skip-field-backward))
+
+
+(defun asw-is-tabable-comment ()
+  "A tabable comment is one where tabbing through it affects spacing.  These
+are comments where the first character of a line is # or ! and the next character
+is not a space"
+  (save-excursion
+    (beginning-of-line)
+    (looking-at "[#!][^ ]")))
+
+
+(defun asw-in-comment ()
+  "Returns the point of the beginning of comment, nil if not in comment"
+  (save-excursion
+    (let ((orig (point)))
+      (beginning-of-line)
+      (or (looking-at "[#!]") (search-forward-regexp "[#!]" orig t)))))
+
+
+(defun asw-skip-field-forward ()
+  (interactive)
+  (cond ((is-face 'font-lock-type-face) (skip-face-forward 'font-lock-type-face) (skip-face-forward 'font-lock-type-face))
+	((is-face 'font-lock-keyword-face) (skip-face-forward 'font-lock-keyword-face) (skip-face-forward 'font-lock-keyword-face)))
+  (search-forward-regexp "\\(\\s-\\|^\\)\\([^ \t\n]+\\)\\(\\s-\\|$\\)" nil t)
+  (goto-char (match-beginning 2)))
+
+
+(defun asw-skip-field-backward ()
+  (interactive)
+  (search-backward-regexp "\\(\\s-\\|^\\)\\([^ \t\n]+\\)\\(\\s-\\|$\\)")
+  (goto-char (match-beginning 2))
+  (if (save-excursion 
+	(forward-char)
+	(is-face 'font-lock-type-face))
+      (progn
+	(forward-char)
+	(skip-face-backward 'font-lock-type-face)
+	(forward-char))))
+
+
+(add-to-list 'auto-mode-alist '("\\.asw\\'" . asw-mode))
 
 
 
